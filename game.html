@@ -46,7 +46,7 @@
   var spawnTimer = 0;
   var caughtStreak = 0;
 
-  var basket = { x: W / 2 - 160 * S, y: H - 150 * S, w: 320 * S, h: 130 * S, speed: 1250 * SX };
+  var basket = { x: W / 2 - 190 * S, y: H - 190 * S, w: 380 * S, h: 145 * S, speed: 1250 * SX }; // bottom rests on the ground band, never clipped by the canvas edge
   var keys = { left: false, right: false };
 
   // ---- background stars (twinkle, bigger and colourful for a bright sunset sky) ----
@@ -60,14 +60,24 @@
   // ---- setting sun ----
   var moon = { x: W * 0.79, y: H * 0.64, r: 110 * S };
 
+  // ---- drifting clouds (soft pink, slow, for a full sky) ----
+  var clouds = [];
+  for (var ci = 0; ci < 6; ci++) {
+    clouds.push({ x: Math.random() * W, y: H * (0.08 + Math.random() * 0.32),
+      s: (0.7 + Math.random() * 0.9) * S, v: (10 + Math.random() * 18) * SX,
+      a: 0.10 + Math.random() * 0.10 });
+  }
+
   function rand(a, b) { return a + Math.random() * (b - a); }
 
   function spawnStar() {
     var speed = rand(300, 480) * SY + (GAME_SECONDS - timeLeft) * 2.2; // gently faster late
+    var superStar = Math.random() < 0.09; // rare big golden bonus star
     stars.push({
       x: rand(60, W - 60), y: -50,
       vy: speed, vx: rand(-35, 35) * SX,
-      r: rand(34, 52) * S, rot: rand(0, Math.PI * 2), vr: rand(-1.4, 1.4),
+      r: (superStar ? rand(58, 72) : rand(34, 52)) * S, rot: rand(0, Math.PI * 2), vr: rand(-1.4, 1.4),
+      superStar: superStar, trail: [],
       hue: (function () { var q = Math.random(); return q < 0.2 ? "pink" : q < 0.34 ? "blue" : "gold"; })()
     });
   }
@@ -98,6 +108,10 @@
     caughtStreak += 1;
     var c = s.hue === "pink" ? "#ff9ecf" : s.hue === "blue" ? "#8fd3ff" : "#ffd94d";
     burst(s.x, s.y, c);
+    if (s.superStar) {
+      burst(s.x, s.y, "#fff3b0");
+      floats.push({ x: s.x, y: s.y - 110, text: "GOLD!", life: 1.2, max: 1.2, gold: true });
+    }
     floats.push({ x: s.x, y: s.y - 20, text: "+1", life: 0.9, max: 0.9, big: true });
     if (caughtStreak >= 3) {
       floats.push({ x: s.x, y: s.y - 95, text: "COMBO x" + caughtStreak, life: 1.1, max: 1.1, combo: true });
@@ -107,6 +121,11 @@
   function update(dt) {
     // twinkle
     for (var i = 0; i < sky.length; i++) sky[i].p += dt * sky[i].s;
+    // clouds drift across the sky, wrap around
+    for (var ci = 0; ci < clouds.length; ci++) {
+      clouds[ci].x += clouds[ci].v * dt;
+      if (clouds[ci].x - 220 * clouds[ci].s > W) clouds[ci].x = -220 * clouds[ci].s;
+    }
 
     // basket movement: demo autopilot follows the lowest falling star
     var target = null, lowest = -1;
@@ -135,12 +154,16 @@
     spawnTimer -= dt;
     if (spawnTimer <= 0) {
       spawnStar();
-      spawnTimer = Math.max(0.22, 0.5 - (GAME_SECONDS - timeLeft) * 0.004);
+      if (Math.random() < 0.35) spawnStar(); // often two at once: a busy sky
+      spawnTimer = Math.max(0.16, 0.30 - (GAME_SECONDS - timeLeft) * 0.003);
     }
 
     for (var k = stars.length - 1; k >= 0; k--) {
       var s = stars[k];
       s.y += s.vy * dt; s.x += s.vx * dt; s.rot += s.vr * dt;
+      // trail: remember recent positions for a comet tail
+      s.trail.push({ x: s.x, y: s.y });
+      if (s.trail.length > 9) s.trail.shift();
       // catch: star centre inside basket mouth
       if (s.y + s.r * 0.5 >= basket.y + 6 && s.y < basket.y + basket.h &&
           s.x > basket.x - 10 && s.x < basket.x + basket.w + 10) {
@@ -212,6 +235,19 @@
     ctx.beginPath(); ctx.roundRect(x - 12 * S, y - 14 * S, w + 24 * S, 30 * S, 15 * S); ctx.fill();
     ctx.fillStyle = "#8a5424";
     ctx.beginPath(); ctx.roundRect(x - 12 * S, y - 14 * S, w + 24 * S, 10 * S, 5 * S); ctx.fill();
+    // cute face on the basket body: eyes, smile, rosy cheeks
+    var eyeY = y + h * 0.48, eyeDX = w * 0.19, eyeR = 15 * S;
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(x + w / 2 - eyeDX, eyeY, eyeR, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + w / 2 + eyeDX, eyeY, eyeR, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#2b1608";
+    ctx.beginPath(); ctx.arc(x + w / 2 - eyeDX, eyeY + 2 * S, eyeR * 0.52, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + w / 2 + eyeDX, eyeY + 2 * S, eyeR * 0.52, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#2b1608"; ctx.lineWidth = 5 * S; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.arc(x + w / 2, y + h * 0.52, 26 * S, Math.PI * 0.2, Math.PI * 0.8); ctx.stroke();
+    ctx.fillStyle = "rgba(255,120,140,0.55)";
+    ctx.beginPath(); ctx.arc(x + w / 2 - eyeDX - 26 * S, eyeY + 16 * S, 12 * S, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + w / 2 + eyeDX + 26 * S, eyeY + 16 * S, 12 * S, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
 
@@ -286,6 +322,25 @@
       ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
+    // drifting clouds
+    for (var ci = 0; ci < clouds.length; ci++) {
+      var cl = clouds[ci];
+      ctx.save();
+      ctx.globalAlpha = cl.a;
+      ctx.fillStyle = "#ffd9ec";
+      ctx.beginPath();
+      ctx.ellipse(cl.x, cl.y, 120 * cl.s, 34 * cl.s, 0, 0, Math.PI * 2);
+      ctx.ellipse(cl.x - 70 * cl.s, cl.y + 12 * cl.s, 70 * cl.s, 24 * cl.s, 0, 0, Math.PI * 2);
+      ctx.ellipse(cl.x + 75 * cl.s, cl.y + 10 * cl.s, 80 * cl.s, 26 * cl.s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    // far hills (lighter, for depth)
+    ctx.fillStyle = "#3d1a56";
+    ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(0, H - 210);
+    ctx.quadraticCurveTo(W * 0.25, H - 330, W * 0.55, H - 220);
+    ctx.quadraticCurveTo(W * 0.8, H - 140, W, H - 230);
+    ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
     // hills
     ctx.fillStyle = "#2b1240";
     ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(0, H - 130);
@@ -299,7 +354,22 @@
     if (state === "playing" || state === "over") {
       for (var j = 0; j < stars.length; j++) {
         var st = stars[j];
-        drawStar(st.x, st.y, st.r, st.rot, st.hue === "pink" ? "#ff9ecf" : st.hue === "blue" ? "#8fd3ff" : "#ffd94d");
+        // comet trail: fading dots behind the star
+        var tcol = st.hue === "pink" ? "#ff9ecf" : st.hue === "blue" ? "#8fd3ff" : "#ffd94d";
+        for (var ti = 0; ti < st.trail.length; ti++) {
+          var tp = st.trail[ti];
+          ctx.globalAlpha = (ti / st.trail.length) * 0.45;
+          ctx.fillStyle = tcol;
+          ctx.beginPath(); ctx.arc(tp.x, tp.y, st.r * 0.32 * (ti / st.trail.length + 0.3), 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        drawStar(st.x, st.y, st.r, st.rot, tcol);
+        if (st.superStar) {
+          ctx.globalAlpha = 0.55 + 0.45 * Math.sin(performance.now() / 90);
+          ctx.strokeStyle = "#fff3b0"; ctx.lineWidth = 4 * S;
+          ctx.beginPath(); ctx.arc(st.x, st.y, st.r * 1.35, 0, Math.PI * 2); ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
       }
       for (var m = 0; m < sparks.length; m++) {
         var p = sparks[m];
@@ -311,14 +381,18 @@
       for (var n = 0; n < floats.length; n++) {
         var f = floats[n];
         ctx.globalAlpha = Math.max(0, f.life / f.max);
-        if (f.combo) {
+        if (f.gold) {
+          ctx.fillStyle = "#fff3b0";
+          ctx.font = "900 " + Math.round(72 * S) + "px 'Segoe UI', Arial, sans-serif";
+          ctx.fillText(f.text, f.x - 95 * SX, f.y);
+        } else if (f.combo) {
           ctx.fillStyle = "#ffd94d";
-          ctx.font = "900 " + Math.round(54 * S) + "px 'Segoe UI', Arial, sans-serif";
-          ctx.fillText(f.text, f.x - 110 * SX, f.y);
+          ctx.font = "900 " + Math.round(64 * S) + "px 'Segoe UI', Arial, sans-serif";
+          ctx.fillText(f.text, f.x - 130 * SX, f.y);
         } else {
           ctx.fillStyle = "#ffffff";
-          ctx.font = "900 " + Math.round(68 * S) + "px 'Segoe UI', Arial, sans-serif";
-          ctx.fillText(f.text, f.x - 30 * SX, f.y);
+          ctx.font = "900 " + Math.round(96 * S) + "px 'Segoe UI', Arial, sans-serif";
+          ctx.fillText(f.text, f.x - 42 * SX, f.y);
         }
       }
       ctx.globalAlpha = 1;

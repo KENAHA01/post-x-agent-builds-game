@@ -20,7 +20,10 @@
   "use strict";
   var canvas = document.getElementById("game");
   var ctx = canvas.getContext("2d");
-  var W = 1920, H = 1080;
+  var PORTRAIT = /[?#&]phone=1/.test(location.search + location.hash);
+  if (PORTRAIT) { canvas.width = 720; canvas.height = 1280; }
+  var W = canvas.width, H = canvas.height;
+  var SX = W / 1920, SY = H / 1080, S = Math.min(SX, SY);
 
   var DEMO = /[?#&]demo=1/.test(location.search + location.hash);
   var GAME_SECONDS = (function () {
@@ -32,6 +35,8 @@
   // ---- state ----
   var state = "ready"; // ready | playing | over
   var score = 0;
+  var lives = 3;
+  var endReason = "time"; // time | lives
   var timeLeft = GAME_SECONDS;
   var lastTick = 0;
   var elapsed = 0;
@@ -41,41 +46,42 @@
   var spawnTimer = 0;
   var caughtStreak = 0;
 
-  var basket = { x: W / 2 - 130, y: H - 130, w: 260, h: 110, speed: 1150 };
+  var basket = { x: W / 2 - 160 * S, y: H - 150 * S, w: 320 * S, h: 130 * S, speed: 1250 * SX };
   var keys = { left: false, right: false };
 
-  // ---- background stars (twinkle) ----
+  // ---- background stars (twinkle, bigger and colourful for a bright sunset sky) ----
+  var SKY_COLORS = ["#cdd8ff", "#ffe9a8", "#ffb3d9", "#a8e6ff"];
   var sky = [];
-  for (var i = 0; i < 160; i++) {
-    sky.push({ x: Math.random() * W, y: Math.random() * H * 0.85,
-      r: Math.random() * 2.2 + 0.6, p: Math.random() * Math.PI * 2,
-      s: 0.5 + Math.random() * 1.6 });
+  for (var i = 0; i < 320; i++) {
+    sky.push({ x: Math.random() * W, y: Math.random() * H * 0.8,
+      r: (Math.random() * 3.4 + 0.8) * S, p: Math.random() * Math.PI * 2,
+      s: 0.5 + Math.random() * 1.6, c: SKY_COLORS[i % SKY_COLORS.length] });
   }
-  // ---- moon ----
-  var moon = { x: 1500, y: 330, r: 70 };
+  // ---- setting sun ----
+  var moon = { x: W * 0.79, y: H * 0.64, r: 110 * S };
 
   function rand(a, b) { return a + Math.random() * (b - a); }
 
   function spawnStar() {
-    var speed = rand(260, 430) + (GAME_SECONDS - timeLeft) * 2.2; // gently faster late
+    var speed = rand(300, 480) * SY + (GAME_SECONDS - timeLeft) * 2.2; // gently faster late
     stars.push({
       x: rand(60, W - 60), y: -50,
-      vy: speed, vx: rand(-35, 35),
-      r: rand(26, 40), rot: rand(0, Math.PI * 2), vr: rand(-1.4, 1.4),
-      hue: Math.random() < 0.22 ? "pink" : "gold"
+      vy: speed, vx: rand(-35, 35) * SX,
+      r: rand(34, 52) * S, rot: rand(0, Math.PI * 2), vr: rand(-1.4, 1.4),
+      hue: (function () { var q = Math.random(); return q < 0.2 ? "pink" : q < 0.34 ? "blue" : "gold"; })()
     });
   }
 
   function burst(x, y, color) {
-    for (var i = 0; i < 14; i++) {
-      var a = Math.random() * Math.PI * 2, sp = rand(60, 320);
+    for (var i = 0; i < 26; i++) {
+      var a = Math.random() * Math.PI * 2, sp = rand(80, 420) * S;
       sparks.push({ x: x, y: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60,
-        life: 0.55, max: 0.55, color: color });
+        life: 0.7, max: 0.7, color: color });
     }
   }
 
   function startGame() {
-    score = 0; timeLeft = GAME_SECONDS; elapsed = 0;
+    score = 0; lives = 3; endReason = "time"; timeLeft = GAME_SECONDS; elapsed = 0;
     stars = []; sparks = []; floats = []; spawnTimer = 0; caughtStreak = 0;
     basket.x = W / 2 - basket.w / 2;
     state = "playing";
@@ -90,9 +96,12 @@
   function catchStar(s) {
     score += 1;
     caughtStreak += 1;
-    var c = s.hue === "pink" ? "#ff9ecf" : "#ffd94d";
+    var c = s.hue === "pink" ? "#ff9ecf" : s.hue === "blue" ? "#8fd3ff" : "#ffd94d";
     burst(s.x, s.y, c);
-    floats.push({ x: s.x, y: s.y - 20, text: "+1", life: 0.9, max: 0.9 });
+    floats.push({ x: s.x, y: s.y - 20, text: "+1", life: 0.9, max: 0.9, big: true });
+    if (caughtStreak >= 3) {
+      floats.push({ x: s.x, y: s.y - 95, text: "COMBO x" + caughtStreak, life: 1.1, max: 1.1, combo: true });
+    }
   }
 
   function update(dt) {
@@ -126,7 +135,7 @@
     spawnTimer -= dt;
     if (spawnTimer <= 0) {
       spawnStar();
-      spawnTimer = Math.max(0.28, 0.62 - (GAME_SECONDS - timeLeft) * 0.004);
+      spawnTimer = Math.max(0.22, 0.5 - (GAME_SECONDS - timeLeft) * 0.004);
     }
 
     for (var k = stars.length - 1; k >= 0; k--) {
@@ -139,7 +148,14 @@
         stars.splice(k, 1);
         continue;
       }
-      if (s.y - s.r > H) { stars.splice(k, 1); caughtStreak = 0; }
+      if (s.y - s.r > H) {
+        stars.splice(k, 1); caughtStreak = 0;
+        // attract mode never dies: lives only count in real play
+        if (!DEMO) {
+          lives -= 1;
+          if (lives <= 0) { endReason = "lives"; endGame(); return; }
+        }
+      }
     }
 
     for (var m = sparks.length - 1; m >= 0; m--) {
@@ -165,7 +181,7 @@
       if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
     }
     ctx.closePath();
-    ctx.shadowColor = color; ctx.shadowBlur = 22;
+    ctx.shadowColor = color; ctx.shadowBlur = 30 * S;
     ctx.fillStyle = color;
     ctx.fill();
     ctx.shadowBlur = 0;
@@ -179,98 +195,131 @@
     ctx.save();
     // soft shadow
     ctx.fillStyle = "rgba(0,0,0,0.35)";
-    ctx.beginPath(); ctx.ellipse(x + w / 2, y + h + 12, w * 0.52, 14, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x + w / 2, y + h + 12 * S, w * 0.52, 14 * S, 0, 0, Math.PI * 2); ctx.fill();
     // body: woven basket
     var grad = ctx.createLinearGradient(x, y, x, y + h);
     grad.addColorStop(0, "#c98a4b"); grad.addColorStop(0.5, "#a5662f"); grad.addColorStop(1, "#7d4a1e");
     ctx.beginPath();
-    ctx.moveTo(x, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w - 26, y + h); ctx.lineTo(x + 26, y + h);
+    ctx.moveTo(x, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w - 26 * S, y + h); ctx.lineTo(x + 26 * S, y + h);
     ctx.closePath(); ctx.fillStyle = grad; ctx.fill();
     ctx.strokeStyle = "rgba(60,32,8,0.55)"; ctx.lineWidth = 3;
     for (var r = 1; r <= 3; r++) {
       var yy = y + (h / 4) * r;
-      ctx.beginPath(); ctx.moveTo(x + 8 + r * 5, yy); ctx.lineTo(x + w - 8 - r * 5, yy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + 8 * S + r * 5 * S, yy); ctx.lineTo(x + w - 8 * S - r * 5 * S, yy); ctx.stroke();
     }
     // rim
     ctx.fillStyle = "#e0aa66";
-    ctx.beginPath(); ctx.roundRect(x - 12, y - 14, w + 24, 30, 15); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(x - 12 * S, y - 14 * S, w + 24 * S, 30 * S, 15 * S); ctx.fill();
     ctx.fillStyle = "#8a5424";
-    ctx.beginPath(); ctx.roundRect(x - 12, y - 14, w + 24, 10, 5); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(x - 12 * S, y - 14 * S, w + 24 * S, 10 * S, 5 * S); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawHeart(cx, cy, r, fill) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(cx, cy + r * 0.9);
+    ctx.bezierCurveTo(cx - r * 1.4, cy - r * 0.1, cx - r * 0.7, cy - r * 1.1, cx, cy - r * 0.3);
+    ctx.bezierCurveTo(cx + r * 0.7, cy - r * 1.1, cx + r * 1.4, cy - r * 0.1, cx, cy + r * 0.9);
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
     ctx.restore();
   }
 
   function drawHUD() {
     ctx.save();
     ctx.textBaseline = "top";
+    ctx.shadowColor = "rgba(0,0,0,0.45)"; ctx.shadowBlur = 14 * S;
     ctx.fillStyle = "#ffffff";
-    ctx.font = "700 54px 'Segoe UI', Arial, sans-serif";
-    ctx.fillText("SCORE  " + score, 56, 44);
+    ctx.font = "900 " + Math.round(84 * S) + "px 'Segoe UI', Arial, sans-serif";
+    ctx.fillText("SCORE  " + score, 56 * SX, 36 * SY);
     var t = Math.ceil(timeLeft);
     ctx.fillStyle = timeLeft <= 10 ? "#ff5d5d" : "#ffffff";
-    ctx.font = "700 54px 'Segoe UI', Arial, sans-serif";
     var label = "TIME  " + t + "s";
-    ctx.fillText(label, W - 56 - ctx.measureText(label).width, 44);
-    ctx.font = "600 30px 'Segoe UI', Arial, sans-serif";
-    ctx.fillStyle = "rgba(255,255,255,0.75)";
-    ctx.fillText("Catch the falling stars!", 56, 116);
-    if (DEMO) {
-      ctx.fillStyle = "rgba(255,217,77,0.95)";
-      ctx.font = "700 30px 'Segoe UI', Arial, sans-serif";
-      ctx.fillText("DEMO MODE - the basket plays itself", W / 2 - 250, 46);
+    ctx.fillText(label, W - 56 * SX - ctx.measureText(label).width, 36 * SY);
+    ctx.shadowBlur = 0;
+    // hearts: 3 lives, top centre
+    var hr = 24 * S;
+    for (var hi = 0; hi < 3; hi++) {
+      drawHeart(W / 2 + (hi - 1) * 64 * S, 165 * SY, hr, hi < lives ? "#ff5d7a" : "rgba(255,255,255,0.25)");
+    }
+    // combo under the score
+    if (caughtStreak >= 2) {
+      ctx.fillStyle = "#ffd94d";
+      ctx.font = "900 " + Math.round(44 * S) + "px 'Segoe UI', Arial, sans-serif";
+      ctx.fillText("COMBO x" + caughtStreak, 56 * SX, 140 * SY);
+    }
+    if (!PORTRAIT) {
+      ctx.font = "600 " + Math.round(34 * S) + "px 'Segoe UI', Arial, sans-serif";
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.fillText("Catch the falling stars!", 56 * SX, 150 * SY);
+      if (DEMO) {
+        ctx.fillStyle = "rgba(255,217,77,0.95)";
+        ctx.font = "700 " + Math.round(34 * S) + "px 'Segoe UI', Arial, sans-serif";
+        ctx.fillText("DEMO MODE - the basket plays itself", W / 2 - 280 * SX, 56 * SY);
+      }
     }
     ctx.restore();
   }
 
   function draw() {
-    // sky
+    // sky: bright sunset gradient, purple to orange
     var g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, "#0a1030"); g.addColorStop(0.55, "#131b45"); g.addColorStop(1, "#1d2b5e");
+    g.addColorStop(0, "#2b1055"); g.addColorStop(0.45, "#7b2d8b");
+    g.addColorStop(0.75, "#e2607a"); g.addColorStop(1, "#ff9a56");
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    // moon
+    // setting sun, warm glow low on the horizon
     ctx.save();
-    ctx.fillStyle = "#f4f1de";
-    ctx.shadowColor = "#f4f1de"; ctx.shadowBlur = 60;
+    ctx.fillStyle = "#ffd9a0";
+    ctx.shadowColor = "#ff9a56"; ctx.shadowBlur = 90 * S;
     ctx.beginPath(); ctx.arc(moon.x, moon.y, moon.r, 0, Math.PI * 2); ctx.fill();
-    ctx.shadowBlur = 0; ctx.fillStyle = "rgba(190,190,170,0.5)";
-    ctx.beginPath(); ctx.arc(moon.x - 26, moon.y - 14, 16, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(moon.x + 30, moon.y + 26, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0; ctx.fillStyle = "rgba(255,150,80,0.45)";
+    ctx.beginPath(); ctx.arc(moon.x - 40 * S, moon.y - 20 * S, 24 * S, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(moon.x + 44 * S, moon.y + 34 * S, 16 * S, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
     // twinkling sky stars
     for (var i = 0; i < sky.length; i++) {
       var s = sky[i];
       ctx.globalAlpha = 0.35 + 0.65 * Math.abs(Math.sin(s.p));
-      ctx.fillStyle = "#cdd8ff";
+      ctx.fillStyle = s.c;
       ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
     // hills
-    ctx.fillStyle = "#0b1233";
+    ctx.fillStyle = "#2b1240";
     ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(0, H - 130);
     ctx.quadraticCurveTo(W * 0.3, H - 260, W * 0.62, H - 140);
     ctx.quadraticCurveTo(W * 0.85, H - 60, W, H - 150);
     ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
     // ground
-    ctx.fillStyle = "#101a3d";
+    ctx.fillStyle = "#22103a";
     ctx.fillRect(0, H - 60, W, 60);
 
     if (state === "playing" || state === "over") {
       for (var j = 0; j < stars.length; j++) {
         var st = stars[j];
-        drawStar(st.x, st.y, st.r, st.rot, st.hue === "pink" ? "#ff9ecf" : "#ffd94d");
+        drawStar(st.x, st.y, st.r, st.rot, st.hue === "pink" ? "#ff9ecf" : st.hue === "blue" ? "#8fd3ff" : "#ffd94d");
       }
       for (var m = 0; m < sparks.length; m++) {
         var p = sparks[m];
         ctx.globalAlpha = Math.max(0, p.life / p.max);
         ctx.fillStyle = p.color;
-        ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(p.x, p.y, 7 * S, 0, Math.PI * 2); ctx.fill();
       }
       ctx.globalAlpha = 1;
       for (var n = 0; n < floats.length; n++) {
         var f = floats[n];
         ctx.globalAlpha = Math.max(0, f.life / f.max);
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "800 44px 'Segoe UI', Arial, sans-serif";
-        ctx.fillText(f.text, f.x - 18, f.y);
+        if (f.combo) {
+          ctx.fillStyle = "#ffd94d";
+          ctx.font = "900 " + Math.round(54 * S) + "px 'Segoe UI', Arial, sans-serif";
+          ctx.fillText(f.text, f.x - 110 * SX, f.y);
+        } else {
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "900 " + Math.round(68 * S) + "px 'Segoe UI', Arial, sans-serif";
+          ctx.fillText(f.text, f.x - 30 * SX, f.y);
+        }
       }
       ctx.globalAlpha = 1;
       drawBasket();
@@ -278,39 +327,42 @@
     drawHUD();
 
     if (state === "ready") {
-      ctx.fillStyle = "rgba(5,8,24,0.62)";
+      ctx.fillStyle = "rgba(43,16,60,0.62)";
       ctx.fillRect(0, 0, W, H);
       ctx.textAlign = "center";
       ctx.fillStyle = "#ffd94d";
-      ctx.font = "900 120px 'Segoe UI', Arial, sans-serif";
-      ctx.fillText("STAR CATCHER", W / 2, 330);
+      ctx.font = "900 " + Math.round(120 * S) + "px 'Segoe UI', Arial, sans-serif";
+      ctx.fillText("STAR CATCHER", W / 2, 330 * SY);
       ctx.fillStyle = "#ffffff";
-      ctx.font = "600 48px 'Segoe UI', Arial, sans-serif";
-      ctx.fillText("Move the basket with the arrow keys.", W / 2, 500);
-      ctx.fillText("Catch falling stars. 60 seconds. One point each.", W / 2, 570);
+      ctx.font = "600 " + Math.round(48 * S) + "px 'Segoe UI', Arial, sans-serif";
+      ctx.fillText("Move the basket with the arrow keys.", W / 2, 500 * SY);
+      ctx.fillText("Catch falling stars. 60 seconds. One point each.", W / 2, 570 * SY);
+      ctx.fillStyle = "#ff9ecf";
+      ctx.font = "600 " + Math.round(40 * S) + "px 'Segoe UI', Arial, sans-serif";
+      ctx.fillText("3 lives - a star that hits the ground costs one.", W / 2, 640 * SY);
       ctx.fillStyle = "#8fd3ff";
-      ctx.font = "700 44px 'Segoe UI', Arial, sans-serif";
-      ctx.fillText(DEMO ? "Demo mode - watch it play itself" : "Press ENTER or click to play", W / 2, 700);
+      ctx.font = "700 " + Math.round(44 * S) + "px 'Segoe UI', Arial, sans-serif";
+      ctx.fillText(DEMO ? "Demo mode - watch it play itself" : "Press ENTER or click to play", W / 2, 730 * SY);
       ctx.textAlign = "left";
     }
 
     if (state === "over") {
-      ctx.fillStyle = "rgba(5,8,24,0.66)";
+      ctx.fillStyle = "rgba(43,16,60,0.66)";
       ctx.fillRect(0, 0, W, H);
       ctx.textAlign = "center";
       ctx.fillStyle = "#ffd94d";
-      ctx.font = "900 130px 'Segoe UI', Arial, sans-serif";
-      ctx.fillText("TIME'S UP!", W / 2, 330);
+      ctx.font = "900 " + Math.round(130 * S) + "px 'Segoe UI', Arial, sans-serif";
+      ctx.fillText(endReason === "lives" ? "OUT OF LIVES!" : "TIME'S UP!", W / 2, 330 * SY);
       ctx.fillStyle = "#ffffff";
-      ctx.font = "700 72px 'Segoe UI', Arial, sans-serif";
-      ctx.fillText("Final score: " + score, W / 2, 520);
+      ctx.font = "700 " + Math.round(72 * S) + "px 'Segoe UI', Arial, sans-serif";
+      ctx.fillText("Final score: " + score, W / 2, 520 * SY);
       var best = score >= 30 ? "Amazing catching!" : score >= 18 ? "Great catching!" : score >= 8 ? "Nice catching!" : "Keep practising!";
       ctx.fillStyle = "#8fd3ff";
-      ctx.font = "600 48px 'Segoe UI', Arial, sans-serif";
-      ctx.fillText(best, W / 2, 630);
+      ctx.font = "600 " + Math.round(48 * S) + "px 'Segoe UI', Arial, sans-serif";
+      ctx.fillText(best, W / 2, 630 * SY);
       ctx.fillStyle = "rgba(255,255,255,0.8)";
-      ctx.font = "600 40px 'Segoe UI', Arial, sans-serif";
-      ctx.fillText(DEMO ? "Restarting demo..." : "Press R to play again", W / 2, 740);
+      ctx.font = "600 " + Math.round(40 * S) + "px 'Segoe UI', Arial, sans-serif";
+      ctx.fillText(DEMO ? "Restarting demo..." : "Press R to play again", W / 2, 740 * SY);
       ctx.textAlign = "left";
     }
   }
@@ -345,6 +397,7 @@
   window.__starCatcher = {
     get state() { return state; },
     get score() { return score; },
+    get lives() { return lives; },
     get timeLeft() { return timeLeft; },
     get stars() { return stars.length; }
   };

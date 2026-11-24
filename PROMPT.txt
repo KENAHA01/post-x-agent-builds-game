@@ -1,0 +1,1 @@
+Build a tiny browser game: a basket catches falling stars, arrow keys move the basket, each star caught scores a point, 60 seconds on the clock, game over screen with final score.
